@@ -1,0 +1,42 @@
+1. What This Project Does & Its Purpose
+
+What it does: This project simulates a backend system designed to track what users are doing on an application (e.g., clicking a button, logging in, making a purchase). When a user performs an action, an "event" is sent to this system, which safely stores it in a database for later auditing, analytics, or triggering other actions.
+
+
+The Purpose (Why build it this way?):
+
+In a massive real-world application (like Amazon or Netflix), millions of user activities happen every second. If the API tried to save every single event directly to a database while the user waited, the database would quickly become overwhelmed, and the API would become slow or crash.
+
+This project solves that by using an Event-Driven Architecture. Instead of saving directly to a database, the API just drops the event into a fast, temporary "queue" (RabbitMQ) and immediately tells the user "Got it!". Meanwhile, a background worker (Consumer) quietly reads from that queue at its own pace and saves the data to the database. This guarantees high performance and prevents data loss even if the database is temporarily down.
+
+
+2. How Each Functionality is Implemented
+
+Activity Ingestion & Validation:
+Implemented in the API Service. When a POST /activities request arrives, an Express middleware uses the Joi library to check if the payload has all required fields (like userId and eventType). If it's bad data, it immediately blocks it and returns a 400 Bad Request.
+
+Rate Limiting:
+Implemented in the API Service (rateLimiter.js). It looks at the incoming IP address and keeps a count in the server's memory. If an IP exceeds 50 requests within 60 seconds, it stops processing and returns a 429 Too Many Requests error to prevent spam/abuse (DDoS attacks).
+
+Message Publishing (Producer):
+Once data is validated, the API connects to RabbitMQ and publishes the JSON data as a message into a queue named user_activities. It then immediately responds to the client with 202 Accepted.
+
+Message Processing (Consumer):
+Implemented in the Consumer Service. This is a background script that listens to the user_activities queue. When a message arrives, it converts the JSON string back into a JavaScript object.
+
+Reliability (ACK/NACK):
+If the consumer successfully saves the data to the database, it sends an ack (acknowledgment) to RabbitMQ to say "I'm done, you can delete this message". If the database crashes mid-save, it throws an error and sends a nack (negative acknowledgment), telling RabbitMQ to put the message back in the queue to try again later.
+
+3. How Each Technology Helps
+
+Node.js & Express:
+Node.js is extremely fast at handling thousands of simultaneous connections without locking up (Non-Blocking I/O). Express makes it incredibly easy to set up the HTTP web server and route the requests.
+
+RabbitMQ (Message Broker):
+The core of the event-driven system. It acts as the "shock absorber." If you get 10,000 requests in one second, RabbitMQ safely holds those 10,000 messages in a queue. It decouples the fast API from the slower database, guaranteeing that no data is lost during traffic spikes.
+
+MongoDB & Mongoose (Database):
+MongoDB is a NoSQL database. Because user activities can have wildly different "payloads" (a login event looks different than a purchase event), a NoSQL database is perfect because it allows storing flexible, schema-less JSON documents. Mongoose helps us interact with MongoDB using easy-to-read JavaScript code.
+
+Docker & Docker Compose:
+They package your Node applications, RabbitMQ, and MongoDB into isolated containers. This guarantees the "it works on my machine" promise. With one command (docker-compose up), Docker downloads the databases, sets up the network, and runs your code exactly the same way every time, whether you are on Windows, Mac, or deploying to AWS.
