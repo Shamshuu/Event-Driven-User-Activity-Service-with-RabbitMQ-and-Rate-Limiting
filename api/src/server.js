@@ -10,7 +10,7 @@ app.use(express.json());
 
 app.use('/api/v1/activities', activityRoutes);
 
-app.get('/api/v1/health', (req, res) => {
+app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
 
