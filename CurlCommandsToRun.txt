@@ -1,0 +1,69 @@
+docker compose up --build -d
+
+
+1. Health Check
+
+curl -X GET http://localhost:3000/health -v
+(You should see a 200 OK response.)
+
+
+2. Valid Event Ingestion
+Send a properly formatted activity event. This tests the validator, the rate limiter, and publishing to RabbitMQ.
+
+curl -X POST http://localhost:3000/api/v1/activities \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "12345-abcde",
+    "eventType": "page_view",
+    "timestamp": "2023-10-27T10:00:00Z",
+    "payload": {
+        "url": "/home",
+        "browser": "Firefox"
+    }
+}' -v
+
+(You should see a 202 Accepted response with an id in the JSON body, meaning the event was queued).
+
+
+3. Invalid Event Data
+Intentionally send a payload that is missing the required userId field to see how the system handles bad data.
+
+curl -X POST http://localhost:3000/api/v1/activities \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eventType": "page_view",
+    "timestamp": "2023-10-27T10:00:00Z",
+    "payload": {}
+}' -v
+
+(You should see a 400 Bad Request response with the message {"error":"\"userId\" is required"}).
+
+
+4. Rate Limiting
+To test the rate limiter, you need to send more than 50 requests in under 60 seconds. You can use this simple Bash for loop to instantly fire off 55 requests.
+
+for i in {1..55}; do
+  echo "Request $i:"
+  curl -s -w "\nHTTP Code: %{http_code}\n\n" -X POST http://localhost:3000/api/v1/activities \
+    -H "Content-Type: application/json" \
+    -d '{
+      "userId": "rate-limit-tester",
+      "eventType": "spam",
+      "timestamp": "2023-10-27T10:00:00Z",
+      "payload": {}
+  }'
+done
+
+(Requests 1 through 50 will output HTTP Code: 202 and say "message":"Accepted". Requests 51 through 55 will output HTTP Code: 429 and say "error":"Too Many Requests").
+
+
+5. Verify the Database
+!should be run in root directory!
+To prove the Consumer Service successfully took those valid messages out of RabbitMQ and saved them to MongoDB, run this command to connect to your Mongo container and print the saved documents:
+
+docker-compose exec database mongosh -u user -p password --authenticationDatabase admin --eval "use activity_db" --eval "db.activities.find().pretty()"
+(You should see a list of JSON documents representing all the valid activities you just triggered, proving the entire Event-Driven loop works end-to-end!)
+
+
+
+docker compose down -v
